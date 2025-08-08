@@ -30,6 +30,12 @@
       .builder-csv-hidden {
         display: none;
       }
+
+      .hidden {
+        width: 0;
+        height: 0;
+        overflow: hidden;
+      }
     </style>
   </head>
   <body>
@@ -38,10 +44,12 @@
       Download CSV
     </button>
     <pre id="status" class="builder-csv-hidden"></pre>
+    <p class="hidden">v2</p>
 
     <script>
       const API_KEY = "da92e0c53398459689b527346fc360a5";
       const MODEL = "page";
+      const BASE_URL = "https://berlin-recycling.de"; // Replace with your actual domain
 
       function showStatus(message) {
         const status = document.getElementById("status");
@@ -52,6 +60,90 @@
       function hideStatus() {
         const status = document.getElementById("status");
         status.classList.add("builder-csv-hidden");
+      }
+
+      async function getAllBuilderContentUrls(model) {
+        try {
+          const allResults = [];
+          let offset = 0;
+          let hasMore = true;
+          const PAGE_LIMIT = 50;
+
+          while (hasMore) {
+            let BASE_URL_API = `https://cdn.builder.io/api/v2/content/${model}?apiKey=${API_KEY}&limit=${PAGE_LIMIT}&offset=${offset}`;
+
+            const res = await fetch(BASE_URL_API);
+
+            if (!res.ok) {
+              console.error(`Builder.io API error (${model}):`, res.statusText);
+              break;
+            }
+
+            const data = await res.json();
+            const results = data.results || [];
+
+            allResults.push(...results);
+            offset += PAGE_LIMIT;
+            hasMore = results.length === PAGE_LIMIT;
+          }
+
+          return allResults
+            .filter((item) => {
+              const slug = item.data?.slug;
+              const category = item.data?.category;
+              if (!slug) return false;
+              if (model === "job-details" && slug === "details") return false;
+              if (model === "blog-posts" && !category) return false;
+              return true;
+            })
+            .map((item) => {
+              const slug = item.data?.slug;
+              let fullUrl = "";
+
+              if (model === "blog-posts") {
+                fullUrl = `${BASE_URL}/blog${slug}`;
+              } else if (model === "job-details") {
+                fullUrl = `${BASE_URL}/jobs/${slug}`;
+              } else if (model === "materials") {
+                fullUrl = `${BASE_URL}/entsorgung/abfall-abc/${slug}`;
+              } else if (model === "abfallschlussel-avv-model") {
+                fullUrl = `${BASE_URL}/wissen/avv/${slug}`;
+              } else {
+                fullUrl = `${BASE_URL}/${slug}`;
+              }
+
+              const publish = item.data?.publish;
+
+              return {
+                id: item.id || "",
+                title: item.data?.title || slug,
+                description: item.data?.description || "",
+                name: slug,
+                url: fullUrl,
+                keywords: item.data?.keywords || "",
+                noIndex: item.data?.noIndex || false,
+                searchTitle: item.data?.searchTitle || "",
+                responsiblePersonName: "",
+                createdDate: item.createdAt || "",
+                lastUpdated: item.updatedAt || "",
+                published: item.published,
+                type: `Content Model ${model}`,
+                builderLink: `https://builder.io/content/${item.id}/edit?activeDesignerTab=3&activeLocale=Default`,
+                lastModified: publish
+                  ? new Date(publish).toISOString().slice(0, 10)
+                  : new Date().toISOString().slice(0, 10),
+                changeFrequency: "daily",
+                priority: 0.7,
+                contentType: model,
+              };
+            });
+        } catch (error) {
+          console.error(
+            `Failed to fetch Builder.io content (${model}):`,
+            error
+          );
+          return [];
+        }
       }
 
       async function fetchAllPages() {
@@ -131,6 +223,8 @@
           } else {
             page.responsiblePersonName = "";
           }
+
+          page.type = "Page";
         }
 
         return pages;
@@ -147,10 +241,11 @@
           "noIndex",
           "searchTitle",
           "responsiblePersonName",
-          "createdDate",
-          "lastUpdated",
+          "type",
           "published",
           "builderLink",
+          "createdDate",
+          "lastUpdated",
         ];
         const rows = [fields.join(",")];
 
@@ -189,8 +284,9 @@
 
         try {
           button.disabled = true;
-          showStatus("Fetching pages...");
+          showStatus("Fetching all content models...");
 
+          // Fetch pages
           const pages = await fetchAllPages();
           showStatus(
             `Fetched ${pages.length} pages. Resolving responsible person references...`
@@ -198,12 +294,32 @@
 
           const pagesWithPersons = await resolveResponsiblePersons(pages);
 
-          showStatus("Converting to CSV...");
-          const csv = convertToCSV(pagesWithPersons);
+          // Fetch additional content models
+          const contentModels = [
+            "blog-posts",
+            "job-details",
+            "materials",
+            "abfallschlussel-avv-model",
+          ];
+          const allContent = [...pagesWithPersons];
 
-          triggerDownload("builder-pages.csv", csv);
+          for (const model of contentModels) {
+            showStatus(`Fetching ${model} content...`);
+            const modelContent = await getAllBuilderContentUrls(model);
+            allContent.push(...modelContent);
+            showStatus(
+              `Fetched ${modelContent.length} ${model} items. Total: ${allContent.length} items.`
+            );
+          }
+
+          showStatus("Converting to CSV...");
+          const csv = convertToCSV(allContent);
+
+          triggerDownload("builder-all-content.csv", csv);
           showStatus(
-            `✅ Downloaded ${pages.length} pages to CSV with responsible person names`
+            `✅ Downloaded ${
+              allContent.length
+            } total items to CSV (pages + ${contentModels.join(", ")})`
           );
 
           // Hide status after 3 seconds
