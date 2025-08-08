@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Builder.io Pages to CSV</title>
+    <style>
+      .builder-csv-btn {
+        height: auto;
+        width: auto;
+        border-radius: 9999px;
+        background-color: rgb(48 48 48);
+        padding: 0.75rem 1.5rem;
+        color: white;
+        font-size: 1rem;
+        border: none;
+        cursor: pointer;
+        transition: opacity 100ms ease-in;
+      }
+      .builder-csv-btn:hover {
+        opacity: 0.9;
+      }
+      .builder-csv-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      pre {
+        white-space: pre-wrap;
+        margin-top: 1em;
+      }
+      .builder-csv-hidden {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Download Builder.io Pages as CSV</h1>
+    <button class="builder-csv-btn" onclick="downloadPages()">
+      Download CSV
+    </button>
+    <pre id="status" class="builder-csv-hidden"></pre>
+
+    <script>
+      const API_KEY = "da92e0c53398459689b527346fc360a5";
+      const MODEL = "page";
+
+      function showStatus(message) {
+        const status = document.getElementById("status");
+        status.textContent = message;
+        status.classList.remove("builder-csv-hidden");
+      }
+
+      function hideStatus() {
+        const status = document.getElementById("status");
+        status.classList.add("builder-csv-hidden");
+      }
+
+      async function fetchAllPages() {
+        const allPages = [];
+        let offset = 0;
+        const limit = 100;
+        let hasMore = true;
+
+        while (hasMore) {
+          const url = `https://cdn.builder.io/api/v2/content/${MODEL}?apiKey=${API_KEY}&limit=${limit}&offset=${offset}&query.published.%24ne=archived&query.priority.%24exists=true`;
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(`Failed to fetch: ${res.statusText}`);
+
+          const data = await res.json();
+          allPages.push(...data.results);
+
+          if (data.results.length < limit) {
+            hasMore = false;
+          } else {
+            offset += limit;
+          }
+        }
+
+        return allPages;
+      }
+
+      async function fetchReference(model, id) {
+        const url = `https://cdn.builder.io/api/v2/content/${model}?apiKey=${API_KEY}&query.id=${id}`;
+        const res = await fetch(url);
+        if (!res.ok)
+          throw new Error(`Failed to fetch reference: ${res.statusText}`);
+        const data = await res.json();
+        return data.results?.[0]?.data ?? null;
+      }
+
+      async function resolveResponsiblePersons(pages) {
+        const uniquePersonIds = new Set();
+        const personCache = new Map();
+
+        // Collect all unique responsible person IDs
+        for (const page of pages) {
+          const responsiblePersonId = page.data?.responsiblePerson?.id;
+          if (responsiblePersonId && typeof responsiblePersonId === "string") {
+            uniquePersonIds.add(responsiblePersonId);
+          }
+        }
+
+        showStatus(
+          `Fetching ${uniquePersonIds.size} responsible person references...`
+        );
+
+        // Fetch all unique persons
+        const fetchPromises = Array.from(uniquePersonIds).map(
+          async (personId) => {
+            if (!personId) return;
+
+            try {
+              const personData = await fetchReference(
+                "responsible-person",
+                personId
+              );
+              personCache.set(personId, personData?.name || "Unknown");
+            } catch (err) {
+              console.warn(`Failed to fetch person ${personId}:`, err);
+              personCache.set(personId, "Unknown");
+            }
+          }
+        );
+
+        await Promise.all(fetchPromises);
+
+        // Add resolved names to pages
+        for (const page of pages) {
+          const responsiblePersonId = page.data?.responsiblePerson?.id;
+          if (responsiblePersonId && personCache.has(responsiblePersonId)) {
+            page.responsiblePersonName = personCache.get(responsiblePersonId);
+          } else {
+            page.responsiblePersonName = "";
+          }
+        }
+
+        return pages;
+      }
+
+      function convertToCSV(data) {
+        const fields = [
+          "id",
+          "title",
+          "description",
+          "name",
+          "url",
+          "keywords",
+          "noIndex",
+          "searchTitle",
+          "responsiblePersonName",
+          "createdDate",
+          "lastUpdated",
+          "published",
+          "builderLink",
+        ];
+        const rows = [fields.join(",")];
+
+        for (const item of data) {
+          const row = fields
+            .map((field) => {
+              let value;
+              if (field === "responsiblePersonName") {
+                value = item.responsiblePersonName ?? "";
+              } else if (field === "builderLink") {
+                value = `https://builder.io/content/${item.id}/edit?activeDesignerTab=3&activeLocale=Default`;
+              } else {
+                value = item[field] ?? item.data?.[field] ?? "";
+              }
+              return `"${String(value).replace(/"/g, '""')}"`;
+            })
+            .join(",");
+          rows.push(row);
+        }
+
+        return rows.join("\n");
+      }
+
+      function triggerDownload(filename, content) {
+        const blob = new Blob([content], { type: "text/csv" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+
+      async function downloadPages() {
+        const button = document.querySelector("button");
+
+        try {
+          button.disabled = true;
+          showStatus("Fetching pages...");
+
+          const pages = await fetchAllPages();
+          showStatus(
+            `Fetched ${pages.length} pages. Resolving responsible person references...`
+          );
+
+          const pagesWithPersons = await resolveResponsiblePersons(pages);
+
+          showStatus("Converting to CSV...");
+          const csv = convertToCSV(pagesWithPersons);
+
+          triggerDownload("builder-pages.csv", csv);
+          showStatus(
+            `✅ Downloaded ${pages.length} pages to CSV with responsible person names`
+          );
+
+          // Hide status after 3 seconds
+          setTimeout(() => {
+            hideStatus();
+          }, 3000);
+        } catch (err) {
+          console.error(err);
+          showStatus(`❌ Error: ${err.message}`);
+        } finally {
+          button.disabled = false;
+        }
+      }
+    </script>
+  </body>
+</html>
