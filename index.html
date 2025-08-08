@@ -44,7 +44,7 @@
       Download CSV
     </button>
     <pre id="status" class="builder-csv-hidden"></pre>
-    <p class="hidden">v2</p>
+    <p class="hidden">v4</p>
 
     <script>
       const API_KEY = "da92e0c53398459689b527346fc360a5";
@@ -114,10 +114,22 @@
 
               const publish = item.data?.publish;
 
+              let title;
+              let description;
+
+              if (model === "materials") {
+                title = item?.data.name;
+                description =
+                  item?.data.shortDescription || item?.data.seoDescription;
+              } else {
+                title = item?.data.title;
+                description = item.data?.description;
+              }
+
               return {
                 id: item.id || "",
-                title: item.data?.title || slug,
-                description: item.data?.description || "",
+                title: title,
+                description: description || "",
                 name: slug,
                 url: fullUrl,
                 keywords: item.data?.keywords || "",
