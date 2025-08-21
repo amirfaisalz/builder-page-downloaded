@@ -44,7 +44,7 @@
       Download CSV
     </button>
     <pre id="status" class="builder-csv-hidden"></pre>
-    <p class="hidden">v5</p>
+    <p class="hidden">v6</p>
 
     <script>
       const API_KEY = "da92e0c53398459689b527346fc360a5";
@@ -157,8 +157,26 @@
                 noIndex: item.data?.noIndex || false,
                 searchTitle: item.data?.searchTitle || "",
                 responsiblePersonName: "",
-                createdDate: item.createdAt || "",
-                lastUpdated: item.updatedAt || "",
+                createdDate:
+                  item.createdDate ?? item.createdAt
+                    ? new Date(
+                        String(item.createdDate ?? item.createdAt).length === 10
+                          ? Number(item.createdDate ?? item.createdAt) * 1000
+                          : Number(item.createdDate ?? item.createdAt)
+                      )
+                        .toISOString()
+                        .slice(0, 10)
+                    : "",
+                lastUpdated:
+                  item.lastUpdated ?? item.updatedAt
+                    ? new Date(
+                        String(item.lastUpdated ?? item.updatedAt).length === 10
+                          ? Number(item.lastUpdated ?? item.updatedAt) * 1000
+                          : Number(item.lastUpdated ?? item.updatedAt)
+                      )
+                        .toISOString()
+                        .slice(0, 10)
+                    : "",
                 published: item.published,
                 type: `Content Model ${model}`,
                 builderLink: `https://builder.io/content/${item.id}/edit?activeDesignerTab=3&activeLocale=Default`,
@@ -292,6 +310,17 @@
                 value = `https://builder.io/content/${item.id}/edit?activeDesignerTab=3&activeLocale=Default`;
               } else {
                 value = item[field] ?? item.data?.[field] ?? "";
+              }
+              if (
+                (field === "createdDate" || field === "lastUpdated") &&
+                value !== "" &&
+                (typeof value === "number" ||
+                  /^(\d{10}|\d{13})$/.test(String(value)))
+              ) {
+                const numeric = Number(value);
+                const millis =
+                  String(value).length === 10 ? numeric * 1000 : numeric;
+                value = new Date(millis).toISOString().slice(0, 10);
               }
               return `"${String(value).replace(/"/g, '""')}"`;
             })
