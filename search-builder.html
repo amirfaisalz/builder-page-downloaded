@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Builder.io Page Search</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        padding: 20px;
+        background: #f9f9f9;
+      }
+      input,
+      button {
+        padding: 10px;
+        font-size: 16px;
+        margin-right: 10px;
+      }
+      #status {
+        margin-top: 15px;
+        font-style: italic;
+        color: #555;
+      }
+      ul {
+        margin-top: 20px;
+      }
+      li {
+        margin: 5px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🔍 Search Builder.io Pages</h1>
+    <p>Enter a keyword to search inside your Builder.io pages.</p>
+
+    <input
+      type="text"
+      id="searchInput"
+      placeholder="Enter keyword (e.g., paperform.co)"
+    />
+    <button onclick="searchPages()">Search</button>
+
+    <p id="status"></p>
+    <ul id="results"></ul>
+
+    <script>
+      const API_KEY = "da92e0c53398459689b527346fc360a5"; // replace with your public API key
+      const MODEL = "page"; // adjust if needed
+      const URL_PREFIX = "https://berlin-recycling.de"; // ✅ your site domain
+
+      async function fetchPages(onBatch) {
+        let results = [];
+        let cursor = null;
+        let batchCount = 0;
+
+        do {
+          batchCount++;
+          const url = new URL(`https://cdn.builder.io/api/v3/content/${MODEL}`);
+          url.searchParams.set("apiKey", API_KEY);
+          url.searchParams.set("limit", "50");
+          if (cursor) url.searchParams.set("cursor", cursor);
+
+          const res = await fetch(url.toString());
+          const data = await res.json();
+
+          if (data?.results) {
+            results.push(...data.results);
+          }
+
+          if (typeof onBatch === "function") {
+            onBatch(batchCount);
+          }
+
+          cursor = data?.cursor || null;
+        } while (cursor);
+
+        return results;
+      }
+
+      async function searchPages() {
+        const term = document
+          .getElementById("searchInput")
+          .value.trim()
+          .toLowerCase();
+        const resultsList = document.getElementById("results");
+        const status = document.getElementById("status");
+
+        resultsList.innerHTML = "";
+        status.textContent = "";
+
+        if (!term) {
+          alert("Please enter a search term");
+          return;
+        }
+
+        status.textContent = "⏳ Searching, please wait...";
+
+        let totalBatches = 0;
+        const pages = await fetchPages((batchNum) => {
+          totalBatches = batchNum;
+          status.textContent = `⏳ Loading... fetched batch ${batchNum}`;
+        });
+
+        const matches = pages.filter((page) =>
+          JSON.stringify(page.data).toLowerCase().includes(term)
+        );
+
+        if (matches.length === 0) {
+          status.textContent = `⚠️ No pages found containing: "${term}" (Checked ${
+            pages.length
+          } pages in ${totalBatches} batch${totalBatches > 1 ? "es" : ""}).`;
+        } else {
+          status.textContent = `✅ Found ${
+            matches.length
+          } page(s) containing "${term}" (from ${
+            pages.length
+          } pages, ${totalBatches} batch${totalBatches > 1 ? "es" : ""}).`;
+          resultsList.innerHTML = matches
+            .map((p) => {
+              const relative = p.data?.url || "";
+              const fullUrl = URL_PREFIX + relative;
+              return `<li><a href="${fullUrl}" target="_blank">${fullUrl}</a></li>`;
+            })
+            .join("");
+        }
+      }
+    </script>
+  </body>
+</html>

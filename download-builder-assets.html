@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Builder.io Assets to CSV</title>
+    <style>
+      .builder-csv-btn {
+        height: auto;
+        width: auto;
+        border-radius: 9999px;
+        background-color: rgb(48 48 48);
+        padding: 0.75rem 1.5rem;
+        color: white;
+        font-size: 1rem;
+        border: none;
+        cursor: pointer;
+        transition: opacity 100ms ease-in;
+      }
+      .builder-csv-btn:hover {
+        opacity: 0.9;
+      }
+      .builder-csv-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      pre {
+        white-space: pre-wrap;
+        margin-top: 1em;
+        background: #f5f5f5;
+        padding: 1rem;
+        border-radius: 0.5rem;
+      }
+      .builder-csv-hidden {
+        display: none;
+      }
+
+      .version {
+        visibility: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Download Builder.io Assets as CSV</h1>
+
+    <button class="builder-csv-btn" onclick="downloadAssets()">
+      Download Assets as CSV
+    </button>
+    <pre id="status" class="builder-csv-hidden"></pre>
+
+    <span class="version">version: v1.3</span>
+
+    <script>
+      function showStatus(message) {
+        const status = document.getElementById("status");
+        status.textContent = message;
+        status.classList.remove("builder-csv-hidden");
+      }
+
+      function hideStatus() {
+        const status = document.getElementById("status");
+        status.classList.add("builder-csv-hidden");
+      }
+
+      async function fetchAllAssets() {
+        const apiKey = "da92e0c53398459689b527346fc360a5";
+        const privateKey = "bpk-cf8577ad13e14fd187225f89c6951676";
+        const limit = 100;
+        let offset = 0;
+        let allAssets = [];
+        let hasMore = true;
+
+        while (hasMore) {
+          showStatus(`Fetching assets ${offset + 1} to ${offset + limit}...`);
+
+          const response = await fetch(
+            `https://cdn.builder.io/api/v1/query-assets?limit=${limit}&offset=${offset}&collection=assets&cachebust=true&noTraverse=true&sort.createdDate=-1&apiKey=${apiKey}`,
+            {
+              method: "GET",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${privateKey}`,
+              },
+            }
+          );
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(
+              `HTTP error! status: ${response.status}, message: ${errorText}`
+            );
+          }
+
+          const data = await response.json();
+
+          // Handle different response structures
+          let assets = [];
+          if (Array.isArray(data)) {
+            assets = data;
+          } else if (data.results && Array.isArray(data.results)) {
+            assets = data.results;
+          } else if (data.data && Array.isArray(data.data)) {
+            assets = data.data;
+          } else {
+            throw new Error(
+              "Unexpected API response structure. Response: " +
+                JSON.stringify(data).substring(0, 200)
+            );
+          }
+
+          if (assets.length === 0) {
+            hasMore = false;
+          } else {
+            allAssets = allAssets.concat(assets);
+            offset += limit;
+
+            // If we got less than the limit, we've reached the end
+            if (assets.length < limit) {
+              hasMore = false;
+            }
+          }
+        }
+
+        return allAssets;
+      }
+
+      function escapeCSVValue(value) {
+        if (value === null || value === undefined) return "";
+        const stringValue = String(value);
+        if (
+          stringValue.includes(",") ||
+          stringValue.includes('"') ||
+          stringValue.includes("\n")
+        ) {
+          return `"${stringValue.replace(/"/g, '""')}"`;
+        }
+        return stringValue;
+      }
+
+      function convertToCSV(assets) {
+        if (assets.length === 0) {
+          return "No assets found";
+        }
+
+        const headers = [
+          "id",
+          "name",
+          "altText",
+          "title",
+          "type",
+          "size",
+          "bytes",
+          "width",
+          "height",
+          "url",
+        ];
+
+        const rows = [headers.map(escapeCSVValue).join(",")];
+
+        assets.forEach((asset) => {
+          const row = headers.map((header) =>
+            escapeCSVValue(asset[header] || "")
+          );
+          rows.push(row.join(","));
+        });
+
+        return rows.join("\n");
+      }
+
+      function triggerDownload(filename, content) {
+        const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+      }
+
+      async function downloadAssets() {
+        const button = document.querySelector("button");
+
+        try {
+          button.disabled = true;
+          hideStatus();
+
+          const assets = await fetchAllAssets();
+
+          showStatus(`Fetched ${assets.length} assets. Converting to CSV...`);
+
+          const csv = convertToCSV(assets);
+
+          const timestamp = new Date().toISOString().split("T")[0];
+          triggerDownload(`builder-assets-${timestamp}.csv`, csv);
+
+          showStatus(
+            `✅ Successfully downloaded ${assets.length} assets to CSV`
+          );
+
+          setTimeout(() => {
+            hideStatus();
+          }, 5000);
+        } catch (err) {
+          console.error(err);
+          showStatus(`❌ Error: ${err.message}`);
+        } finally {
+          button.disabled = false;
+        }
+      }
+    </script>
+  </body>
+</html>
